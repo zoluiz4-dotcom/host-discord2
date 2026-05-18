@@ -1,18 +1,15 @@
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 import os
 import json
 import subprocess
-import psutil
-import signal
-import threading
-import time
-from datetime import datetime
 import zipfile
 import io
-import shutil
 import re
+import shutil
 import secrets
+from datetime import datetime
+from bot_manager import BotManager
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -23,220 +20,10 @@ PROJETOS_DIR = 'projetos'
 DATA_FILE = 'hospedagens.json'
 os.makedirs(PROJETOS_DIR, exist_ok=True)
 
-# Gerenciador de processos
-class BotManager:
-    def __init__(self):
-        self.processos = {}
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
-    
-    def _monitor_loop(self):
-        while True:
-            for pid, info in list(self.processos.items()):
-                if info['processo'].poll() is not None:
-                    # Bot caiu, tentar reiniciar
-                    socketio.emit('bot_status', {
-                        'nome': info['projeto'],
-                        'status': 'offline',
-                        'pid': pid
-                    })
-            time.sleep(5)
-    
-    def encontrar_arquivo_principal(self, caminho):
-        """Encontra automaticamente o arquivo principal do bot"""
-        arquivos_principais = ['bot.py', 'main.py', 'app.py', 'run.py', 'index.py', 'client.py']
-        
-        for raiz, dirs, arquivos in os.walk(caminho):
-            for arquivo in arquivos:
-                if arquivo in arquivos_principais:
-                    return os.path.join(raiz, arquivo)
-                
-                # Verificar se o arquivo tem código Discord
-                if arquivo.endswith('.py'):
-                    caminho_arquivo = os.path.join(raiz, arquivo)
-                    try:
-                        with open(caminho_arquivo, 'r', encoding='utf-8') as f:
-                            conteudo = f.read()
-                            if 'discord' in conteudo and ('commands.Bot' in conteudo or 'discord.Client' in conteudo):
-                                return caminho_arquivo
-                    except:
-                        pass
-        return None
-    
-    def instalar_dependencias(self, caminho_projeto):
-        """Instala dependências do arquivo requirements.txt"""
-        req_file = os.path.join(caminho_projeto, 'requirements.txt')
-        if os.path.exists(req_file):
-            try:
-                subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', req_file], 
-                             capture_output=True, timeout=120)
-                return True, "Dependências instaladas"
-            except Exception as e:
-                return False, str(e)
-        return True, "Sem dependências"
-    
-    def iniciar_bot(self, usuario_id, projeto_nome, caminho):
-        caminho_abs = os.path.abspath(caminho)
-        
-        # Encontrar arquivo principal
-        arquivo_principal = self.encontrar_arquivo_principal(caminho_abs)
-        if not arquivo_principal:
-            return None, "Arquivo principal não encontrado (bot.py, main.py, etc)"
-        
-        try:
-            # Criar ambiente virtual
-            venv_path = os.path.join(caminho_abs, 'venv')
-            if not os.path.exists(venv_path):
-                subprocess.run([sys.executable, '-m', 'venv', venv_path], 
-                             capture_output=True, timeout=60)
-            
-            # Setup do ambiente
-            if os.name == 'nt':
-                python_exe = os.path.join(venv_path, 'Scripts', 'python.exe')
-                pip_exe = os.path.join(venv_path, 'Scripts', 'pip.exe')
-            else:
-                python_exe = os.path.join(venv_path, 'bin', 'python')
-                pip_exe = os.path.join(venv_path, 'bin', 'pip')
-            
-            # Instalar discord.py
-            subprocess.run([pip_exe, 'install', 'discord.py', '--quiet'], 
-                         capture_output=True, timeout=60)
-            
-            # Instalar outras dependências
-            req_file = os.path.join(caminho_abs, 'requirements.txt')
-            if os.path.exists(req_file):
-                subprocess.run([pip_exe, 'install', '-r', req_file, '--quiet'],
-                             capture_output=True, timeout=180)
-            
-            # Arquivo de log
-            log_path = os.path.join(caminho_abs, 'bot.log')
-            log_file = open(log_path, 'a', encoding='utf-8')
-            log_file.write(f'\n--- Iniciado em {datetime.now()} ---\n')
-            log_file.flush()
-            
-            # Iniciar processo
-            proc = subprocess.Popen(
-                [python_exe, arquivo_principal],
-                stdout=log_file,
-                stderr=log_file,
-                cwd=caminho_abs,
-                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
-            )
-            
-            self.processos[proc.pid] = {
-                'pid': proc.pid,
-                'usuario_id': usuario_id,
-                'projeto': projeto_nome,
-                'processo': proc,
-                'log_path': log_path,
-                'log_file': log_file,
-                'started_at': datetime.now().timestamp(),
-                'caminho': caminho_abs
-            }
-            
-            return proc.pid, "Bot iniciado com sucesso"
-            
-        except Exception as e:
-            return None, str(e)
-    
-    def parar_bot(self, pid):
-        if pid not in self.processos:
-            return False, "Processo não encontrado"
-        
-        try:
-            info = self.processos[pid]
-            proc = info['processo']
-            
-            # Tentar matar o processo e seus filhos
-            if hasattr(os, 'killpg'):
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                except:
-                    pass
-            
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except:
-                proc.kill()
-            
-            try:
-                info['log_file'].close()
-            except:
-                pass
-            
-            del self.processos[pid]
-            return True, "Bot parado"
-            
-        except Exception as e:
-            return False, str(e)
-    
-    def reiniciar_bot(self, pid):
-        if pid not in self.processos:
-            return False, "Processo não encontrado"
-        
-        info = self.processos[pid]
-        nome_projeto = info['projeto']
-        usuario_id = info['usuario_id']
-        caminho = info['caminho']
-        
-        # Parar
-        self.parar_bot(pid)
-        time.sleep(2)
-        
-        # Iniciar novamente
-        novo_pid, msg = self.iniciar_bot(usuario_id, nome_projeto, caminho)
-        return novo_pid is not None, msg
-    
-    def status_bot(self, pid):
-        if pid not in self.processos:
-            return False
-        proc = self.processos[pid]['processo']
-        return proc.poll() is None
-    
-    def obter_logs(self, pid, linhas=100):
-        if pid not in self.processos:
-            return None, "Processo não encontrado"
-        
-        try:
-            log_path = self.processos[pid]['log_path']
-            if not os.path.exists(log_path):
-                return "Sem logs ainda", None
-            
-            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                linhas_log = f.readlines()
-                ultimas_linhas = linhas_log[-linhas:]
-                return ''.join(ultimas_linhas), None
-                
-        except Exception as e:
-            return None, str(e)
-    
-    def obter_uso_recursos(self, pid):
-        if pid not in self.processos:
-            return None
-        
-        try:
-            proc = psutil.Process(pid)
-            cpu = proc.cpu_percent(interval=0.5)
-            mem = proc.memory_info().rss / (1024 * 1024)
-            
-            # Pega filhos também
-            filhos = proc.children(recursive=True)
-            for filho in filhos:
-                cpu += filho.cpu_percent(interval=0.1)
-                mem += filho.memory_info().rss / (1024 * 1024)
-            
-            return {
-                'cpu': round(min(cpu, 100), 1),
-                'mem': round(mem, 1),
-                'status': 'online' if proc.is_running() else 'offline'
-            }
-        except:
-            return None
-
+# Inicializar gerenciador
 bot_manager = BotManager()
 
-# Utilitários
+# Funções auxiliares
 def carregar_dados():
     try:
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
@@ -251,7 +38,6 @@ def salvar_dados(dados):
 def analisar_zip(zip_bytes):
     resultado = {
         'valido': False,
-        'arquivo_principal': None,
         'tamanho_mb': 0,
         'total_arquivos': 0,
         'erros': []
@@ -266,7 +52,7 @@ def analisar_zip(zip_bytes):
             # Verificar se tem arquivo Python
             tem_py = any(n.endswith('.py') for n in nomes)
             if not tem_py:
-                resultado['erros'].append("Nenhum arquivo .py encontrado")
+                resultado['erros'].append("Nenhum arquivo .py encontrado no ZIP")
                 return resultado
             
             resultado['valido'] = True
@@ -322,20 +108,18 @@ def api_deploy():
     if not nome_projeto:
         return jsonify({'error': 'Nome do projeto é obrigatório'}), 400
     
-    # Limpar nome do projeto
-    nome_projeto = re.sub(r'[^a-zA-Z0-9_-]', '', nome_projeto)
+    # Limpar nome
+    nome_projeto = re.sub(r'[^a-zA-Z0-9_-]', '', nome_projeto)[:50]
     if not nome_projeto:
         return jsonify({'error': 'Nome inválido'}), 400
     
-    # Salvar arquivo temporário
-    zip_bytes = arquivo.read()
-    
     # Analisar ZIP
+    zip_bytes = arquivo.read()
     analise = analisar_zip(zip_bytes)
     if not analise['valido']:
         return jsonify({'error': '\n'.join(analise['erros'])}), 400
     
-    # Criar diretório do projeto
+    # Criar diretório
     usuario_id = "anonimo"
     caminho_projeto = os.path.join(PROJETOS_DIR, usuario_id, nome_projeto)
     
@@ -344,7 +128,7 @@ def api_deploy():
     
     os.makedirs(caminho_projeto)
     
-    # Extrair arquivos
+    # Extrair
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         zf.extractall(caminho_projeto)
     
@@ -477,5 +261,4 @@ def handle_connect():
     emit('connected', {'data': 'Conectado ao servidor'})
 
 if __name__ == '__main__':
-    import sys
     socketio.run(app, host='0.0.0.0', port=10000, debug=True)
