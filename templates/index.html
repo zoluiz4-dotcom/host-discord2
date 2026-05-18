@@ -1,17 +1,67 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-    <title>Discord Host</title>
-    <link rel="stylesheet" href="/static/style.css">
+<meta charset="UTF-8">
+<title>Discord Host</title>
+<link rel="stylesheet" href="/static/style.css">
 </head>
+
 <body>
+
+<nav>
 
 <h1>Discord Host</h1>
 
-<p>Hospede bots de Discord grátis</p>
+<div>
 
-<a href="/login">Login</a>
-<a href="/register">Registrar</a>
+<a href="/">Home</a>
+<a href="/upload">Upload</a>
+<a href="/painel">Painel</a>
+<a href="/admin">Admin</a>
+
+</div>
+
+</nav>
+
+<div class="container">
+
+<h2>Seus Bots</h2>
+
+<div class="grid">
+
+{% for bot in bots %}
+
+<div class="card">
+
+<h3>{{ bot.nome }}</h3>
+
+<p>Status:
+<span class="{{ bot.status }}">
+{{ bot.status }}
+</span>
+</p>
+
+<div class="buttons">
+
+<a class="start" href="/start/{{ bot.nome }}">
+START
+</a>
+
+<a class="stop" href="/stop/{{ bot.nome }}">
+STOP
+</a>
+
+</div>
+
+</div>
+
+{% endfor %}
+
+</div>
+
+</div>
+
+<script src="/static/script.js"></script>
 
 </body>
 </html>
