@@ -1,67 +1,511 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-<meta charset="UTF-8">
-<title>Discord Host</title>
-<link rel="stylesheet" href="/static/style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Hosting - Dashboard Profissional</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .online-pulse {
+            animation: pulse 2s infinite;
+        }
+        .terminal {
+            background: #1e1e1e;
+            font-family: 'Courier New', monospace;
+        }
+        .log-line {
+            border-left: 3px solid #10b981;
+            padding-left: 12px;
+            margin: 8px 0;
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .console-log {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+    </style>
 </head>
+<body class="bg-gray-900">
+    <nav class="gradient-bg shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-robot text-white text-2xl"></i>
+                    <span class="text-white font-bold text-xl">Bot Hosting Platform</span>
+                    <span class="bg-green-500 text-xs px-2 py-1 rounded-full text-white">LIVE</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="text-white text-sm hidden md:block">
+                        <i class="fas fa-server mr-1"></i>
+                        <span id="totalBots">0</span> bots ativos
+                    </div>
+                    <button onclick="abrirModalDeploy()" class="bg-white text-purple-600 px-4 py-2 rounded-lg font-semibold hover:bg-gray-100 transition">
+                        <i class="fas fa-upload mr-2"></i>Novo Deploy
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
 
-<body>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Status Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Total de Bots</p>
+                        <p class="text-white text-3xl font-bold" id="totalBotsCard">0</p>
+                    </div>
+                    <i class="fas fa-robot text-blue-500 text-4xl"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Bots Online</p>
+                        <p class="text-white text-3xl font-bold" id="botsOnline">0</p>
+                    </div>
+                    <i class="fas fa-circle text-green-500 text-3xl online-pulse"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">CPU Total</p>
+                        <p class="text-white text-3xl font-bold" id="cpuTotal">0%</p>
+                    </div>
+                    <i class="fas fa-microchip text-purple-500 text-4xl"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">RAM Total</p>
+                        <p class="text-white text-3xl font-bold" id="ramTotal">0 MB</p>
+                    </div>
+                    <i class="fas fa-memory text-red-500 text-4xl"></i>
+                </div>
+            </div>
+        </div>
 
-<nav>
+        <!-- Lista de Bots -->
+        <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-700">
+                <h2 class="text-white text-xl font-bold">
+                    <i class="fas fa-list mr-2"></i>Meus Bots
+                </h2>
+            </div>
+            <div id="botsList" class="divide-y divide-gray-700">
+                <!-- Bots serão carregados aqui -->
+            </div>
+        </div>
+    </div>
 
-<h1>Discord Host</h1>
+    <!-- Modal Deploy -->
+    <div id="deployModal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                <h3 class="text-white text-xl font-bold">
+                    <i class="fas fa-cloud-upload-alt mr-2"></i>Novo Deploy
+                </h3>
+                <button onclick="fecharModalDeploy()" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="deployForm" enctype="multipart/form-data">
+                    <div class="mb-4">
+                        <label class="text-gray-300 block mb-2">Nome do Bot</label>
+                        <input type="text" name="nome" required
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                               placeholder="ex: meu-bot-discord">
+                        <p class="text-gray-500 text-sm mt-1">Use apenas letras, números, - e _</p>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label class="text-gray-300 block mb-2">Arquivo ZIP</label>
+                        <input type="file" name="arquivo" accept=".zip" required
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                        <p class="text-gray-500 text-sm mt-1">Envie seu bot em formato ZIP</p>
+                    </div>
+                    
+                    <button type="submit" class="w-full gradient-bg text-white py-3 rounded-lg font-semibold hover:opacity-90 transition">
+                        <i class="fas fa-rocket mr-2"></i>Fazer Deploy
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
 
-<div>
+    <!-- Modal Console -->
+    <div id="consoleModal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center z-50">
+        <div class="bg-gray-900 rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] mx-4 flex flex-col">
+            <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-terminal text-green-500 text-xl"></i>
+                    <h3 class="text-white text-xl font-bold">Console do Bot</h3>
+                    <span id="consoleBotName" class="text-purple-400 text-sm"></span>
+                </div>
+                <button onclick="fecharConsole()" class="text-gray-400 hover:text-white">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-auto p-4 terminal">
+                <pre id="consoleOutput" class="text-green-400 text-sm console-log whitespace-pre-wrap"></pre>
+            </div>
+            <div class="px-6 py-3 border-t border-gray-700 flex justify-between">
+                <button onclick="atualizarConsole()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition">
+                    <i class="fas fa-sync-alt mr-2"></i>Atualizar
+                </button>
+                <button onclick="limparConsole()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition">
+                    <i class="fas fa-trash mr-2"></i>Limpar
+                </button>
+            </div>
+        </div>
+    </div>
 
-<a href="/">Home</a>
-<a href="/upload">Upload</a>
-<a href="/painel">Painel</a>
-<a href="/admin">Admin</a>
-
-</div>
-
-</nav>
-
-<div class="container">
-
-<h2>Seus Bots</h2>
-
-<div class="grid">
-
-{% for bot in bots %}
-
-<div class="card">
-
-<h3>{{ bot.nome }}</h3>
-
-<p>Status:
-<span class="{{ bot.status }}">
-{{ bot.status }}
-</span>
-</p>
-
-<div class="buttons">
-
-<a class="start" href="/start/{{ bot.nome }}">
-START
-</a>
-
-<a class="stop" href="/stop/{{ bot.nome }}">
-STOP
-</a>
-
-</div>
-
-</div>
-
-{% endfor %}
-
-</div>
-
-</div>
-
-<script src="/static/script.js"></script>
-
+    <script>
+        const socket = io();
+        let currentPid = null;
+        let autoRefreshInterval = null;
+        
+        // Carregar bots
+        async function carregarBots() {
+            try {
+                const response = await fetch('/api/projetos');
+                const data = await response.json();
+                
+                const container = document.getElementById('botsList');
+                const bots = data.projetos || [];
+                
+                if (bots.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-12 text-gray-400">
+                            <i class="fas fa-inbox text-6xl mb-4"></i>
+                            <p>Nenhum bot hospedado ainda</p>
+                            <button onclick="abrirModalDeploy()" class="mt-4 gradient-bg text-white px-6 py-2 rounded-lg">
+                                <i class="fas fa-plus mr-2"></i>Fazer primeiro deploy
+                            </button>
+                        </div>
+                    `;
+                    document.getElementById('totalBots').innerText = '0';
+                    document.getElementById('totalBotsCard').innerText = '0';
+                    document.getElementById('botsOnline').innerText = '0';
+                    return;
+                }
+                
+                const onlineBots = bots.filter(b => b.status === 'online').length;
+                const totalCpu = bots.reduce((sum, b) => sum + (b.cpu || 0), 0);
+                const totalRam = bots.reduce((sum, b) => sum + (b.mem || 0), 0);
+                
+                document.getElementById('totalBots').innerText = bots.length;
+                document.getElementById('totalBotsCard').innerText = bots.length;
+                document.getElementById('botsOnline').innerText = onlineBots;
+                document.getElementById('cpuTotal').innerText = totalCpu.toFixed(1) + '%';
+                document.getElementById('ramTotal').innerText = totalRam.toFixed(0) + ' MB';
+                
+                container.innerHTML = bots.map(bot => `
+                    <div class="p-6 hover:bg-gray-700 transition" id="bot-${bot.id}">
+                        <div class="flex items-center justify-between flex-wrap gap-4">
+                            <div class="flex items-center space-x-4">
+                                <div class="relative">
+                                    <i class="fas fa-robot text-purple-500 text-3xl"></i>
+                                    <div class="absolute -bottom-1 -right-1 w-3 h-3 rounded-full ${bot.status === 'online' ? 'bg-green-500 online-pulse' : 'bg-red-500'}"></div>
+                                </div>
+                                <div>
+                                    <h3 class="text-white font-bold text-lg">${bot.nome}</h3>
+                                    <div class="flex items-center space-x-3 mt-1">
+                                        <span class="text-xs px-2 py-1 rounded-full ${bot.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}">
+                                            ${bot.status === 'online' ? 'ONLINE' : 'OFFLINE'}
+                                        </span>
+                                        <span class="text-gray-400 text-xs">
+                                            <i class="far fa-clock mr-1"></i>${bot.criado || 'N/A'}
+                                        </span>
+                                        <span class="text-gray-400 text-xs">
+                                            <i class="fas fa-database mr-1"></i>${bot.tamanho?.toFixed(2) || 0} MB
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            ${bot.status === 'online' ? `
+                                <div class="flex items-center space-x-4">
+                                    <div class="text-right">
+                                        <div class="text-xs text-gray-400">CPU</div>
+                                        <div class="text-white font-bold">${bot.cpu || 0}%</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-xs text-gray-400">RAM</div>
+                                        <div class="text-white font-bold">${bot.mem || 0} MB</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            <div class="flex space-x-2">
+                                ${bot.status === 'online' ? `
+                                    <button onclick="verConsole(${bot.pid}, '${bot.nome}')" class="bg-gray-600 hover:bg-gray-500 text-white px-3 py-2 rounded-lg transition">
+                                        <i class="fas fa-terminal mr-1"></i>Console
+                                    </button>
+                                    <button onclick="reiniciarBot(${bot.pid}, '${bot.id}')" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-2 rounded-lg transition">
+                                        <i class="fas fa-sync-alt mr-1"></i>Reiniciar
+                                    </button>
+                                    <button onclick="pararBot(${bot.pid}, '${bot.id}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition">
+                                        <i class="fas fa-stop mr-1"></i>Parar
+                                    </button>
+                                ` : `
+                                    <button onclick="verConsole(${bot.pid}, '${bot.nome}')" class="bg-gray-600 hover:bg-gray-500 text-white px-3 py-2 rounded-lg transition" ${!bot.pid ? 'disabled' : ''}>
+                                        <i class="fas fa-terminal mr-1"></i>Console
+                                    </button>
+                                    <button onclick="iniciarBot('${bot.id}')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg transition">
+                                        <i class="fas fa-play mr-1"></i>Iniciar
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                // Atualizar recursos a cada 5 segundos para bots online
+                setTimeout(() => {
+                    bots.forEach(bot => {
+                        if (bot.status === 'online' && bot.pid) {
+                            atualizarRecursos(bot.pid, bot.id);
+                        }
+                    });
+                }, 1000);
+                
+            } catch (error) {
+                console.error('Erro:', error);
+            }
+        }
+        
+        async function atualizarRecursos(pid, botId) {
+            try {
+                const response = await fetch(`/api/recursos/${pid}`);
+                const data = await response.json();
+                
+                if (data.status === 'online') {
+                    const botElement = document.getElementById(`bot-${botId}`);
+                    if (botElement) {
+                        const recursosDiv = botElement.querySelector('.text-right');
+                        if (recursosDiv) {
+                            recursosDiv.innerHTML = `
+                                <div class="text-xs text-gray-400">CPU</div>
+                                <div class="text-white font-bold">${data.cpu || 0}%</div>
+                            `;
+                            recursosDiv.nextElementSibling.innerHTML = `
+                                <div class="text-xs text-gray-400">RAM</div>
+                                <div class="text-white font-bold">${data.mem || 0} MB</div>
+                            `;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Erro ao atualizar recursos:', error);
+            }
+        }
+        
+        async function iniciarBot(projetoId) {
+            try {
+                const response = await fetch('/api/iniciar', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({projeto_id: projetoId})
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showNotification('Bot iniciado com sucesso!', 'success');
+                    carregarBots();
+                } else {
+                    showNotification('Erro: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Erro ao iniciar bot', 'error');
+            }
+        }
+        
+        async function pararBot(pid, botId) {
+            if (!confirm('Tem certeza que deseja parar este bot?')) return;
+            
+            try {
+                const response = await fetch('/api/parar', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({pid: pid})
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showNotification('Bot parado com sucesso!', 'success');
+                    carregarBots();
+                } else {
+                    showNotification('Erro: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Erro ao parar bot', 'error');
+            }
+        }
+        
+        async function reiniciarBot(pid, botId) {
+            if (!confirm('Tem certeza que deseja reiniciar este bot?')) return;
+            
+            try {
+                const response = await fetch('/api/reiniciar', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({pid: pid})
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showNotification('Bot reiniciado com sucesso!', 'success');
+                    setTimeout(() => carregarBots(), 2000);
+                } else {
+                    showNotification('Erro: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Erro ao reiniciar bot', 'error');
+            }
+        }
+        
+        async function verConsole(pid, nome) {
+            if (!pid) {
+                showNotification('Bot offline, console não disponível', 'warning');
+                return;
+            }
+            
+            currentPid = pid;
+            document.getElementById('consoleBotName').innerText = `- ${nome}`;
+            document.getElementById('consoleModal').classList.remove('hidden');
+            document.getElementById('consoleModal').classList.add('flex');
+            await atualizarConsole();
+            
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            autoRefreshInterval = setInterval(atualizarConsole, 5000);
+        }
+        
+        async function atualizarConsole() {
+            if (!currentPid) return;
+            
+            try {
+                const response = await fetch(`/api/logs/${currentPid}`);
+                const data = await response.json();
+                
+                if (data.logs) {
+                    document.getElementById('consoleOutput').innerText = data.logs;
+                } else if (data.error) {
+                    document.getElementById('consoleOutput').innerText = 'Erro: ' + data.error;
+                }
+            } catch (error) {
+                document.getElementById('consoleOutput').innerText = 'Erro ao carregar logs';
+            }
+        }
+        
+        function limparConsole() {
+            document.getElementById('consoleOutput').innerText = '';
+        }
+        
+        function fecharConsole() {
+            document.getElementById('consoleModal').classList.add('hidden');
+            document.getElementById('consoleModal').classList.remove('flex');
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            currentPid = null;
+        }
+        
+        function abrirModalDeploy() {
+            document.getElementById('deployModal').classList.remove('hidden');
+            document.getElementById('deployModal').classList.add('flex');
+        }
+        
+        function fecharModalDeploy() {
+            document.getElementById('deployModal').classList.add('hidden');
+            document.getElementById('deployModal').classList.remove('flex');
+        }
+        
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${
+                type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-yellow-600'
+            } text-white`;
+            notification.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 5000);
+        }
+        
+        // Deploy form
+        document.getElementById('deployForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                showNotification('Enviando arquivo...', 'info');
+                const response = await fetch('/api/deploy', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showNotification(`Deploy realizado! Bot: ${data.projeto} (${data.tamanho.toFixed(2)} MB)`, 'success');
+                    fecharModalDeploy();
+                    carregarBots();
+                    e.target.reset();
+                } else {
+                    showNotification('Erro: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Erro ao fazer deploy', 'error');
+            }
+        });
+        
+        // Socket events
+        socket.on('connect', () => {
+            console.log('Conectado ao servidor');
+        });
+        
+        socket.on('bot_iniciado', (data) => {
+            showNotification(`Bot iniciado! PID: ${data.pid}`, 'success');
+            carregarBots();
+        });
+        
+        socket.on('bot_parado', (data) => {
+            showNotification(`Bot ${data.pid} parado`, 'info');
+            carregarBots();
+        });
+        
+        // Auto refresh
+        setInterval(carregarBots, 10000);
+        carregarBots();
+        
+        // Fechar modal com ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                fecharModalDeploy();
+                fecharConsole();
+            }
+        });
+    </script>
 </body>
 </html>
