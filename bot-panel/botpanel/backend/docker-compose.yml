@@ -1,0 +1,15 @@
+services:
+  panel-backend:
+    build: .
+    container_name: bot-panel-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./bots_data:/app/bots_data
+      - ./panel.db:/app/panel.db
+      # Necessário apenas se USE_DOCKER=true (permite o backend controlar
+      # containers Docker de cada bot na própria máquina host).
+      - /var/run/docker.sock:/var/run/docker.sock
